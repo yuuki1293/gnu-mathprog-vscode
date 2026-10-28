@@ -51,52 +51,113 @@ async function run() {
     assert.ok(undocumented.every(c => !c.value.includes('古いコメント')));
     report.push('Blank line separates unrelated comments from hover');
     if (vscode.workspace.isTrusted) {
-      await vscode.commands.executeCommand('mathprog.check');
-      assert.equal(vscode.languages.getDiagnostics(uri).length, 0); report.push('Model check command');
-      await vscode.commands.executeCommand('mathprog.run'); report.push('Run command');
-      const broken = vscode.Uri.file(path.join(folder, 'broken.mod'));
-      await vscode.workspace.fs.writeFile(broken, Buffer.from('var x >= 0;\nminimize Cost x;\nend;\n'));
-      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(broken));
-      await vscode.commands.executeCommand('mathprog.check');
-      const diagnostics = vscode.languages.getDiagnostics(broken);
-      assert.ok(diagnostics.some(d => d.range.start.line === 1 && d.source === 'glpsol')); report.push('Problems diagnostics');
-      // Use a distinct model/data pair so remembered choices cannot affect this test.
-      const datModel = vscode.Uri.file(path.join(folder, 'dat-run.mod'));
-      const datUri = vscode.Uri.file(path.join(folder, 'dat-run.dat'));
-      const modelText = 'param limit;\nvar x >= 0;\nmaximize Profit: x;\nsubject to Capacity: x <= limit;\nsolve;\nprintf "%g", x > "dat-result.txt";\ndata;\nparam limit := 3;\nend;\n';
-      await vscode.workspace.fs.writeFile(datModel, Buffer.from(modelText));
-      await vscode.workspace.fs.writeFile(datUri, Buffer.from('data;\nparam limit := 7;\nend;\n'));
-      const dataDoc = await vscode.workspace.openTextDocument(datUri);
+      const workspaceFolder = vscode.workspace.workspaceFolders[0];
+      const launchUri = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode', 'launch.json');
+      await vscode.workspace.fs.writeFile(launchUri, Buffer.from('{\n // Keep this user comment.\n "version": "0.2.0",\n "configurations": [{"type":"node","request":"launch","name":"Existing Node","program":"app.js"}]\n}\n'));
+      await new Promise(resolve => {
+        const sub = vscode.workspace.onDidChangeConfiguration(e => {
+          if (e.affectsConfiguration('launch')) { sub.dispose(); resolve(); }
+        });
+        setTimeout(() => { sub.dispose(); resolve(); }, 500);
+      });
+      const initial = { type: 'mathprog', request: 'launch', name: 'Inline production', model: '${workspaceFolder}/production.mod', data: [], cwd: '${workspaceFolder}' };
+      assert.ok(await vscode.commands.executeCommand('mathprog.createConfiguration', initial));
+      const launchText = fs.readFileSync(launchUri.fsPath, 'utf8');
+      assert.ok(launchText.includes('Keep this user comment') && launchText.includes('Existing Node') && launchText.includes('Inline production'));
+      report.push('Create launch.json configuration and preserve existing JSONC and other configurations');
+      assert.ok(await vscode.commands.executeCommand('mathprog.check', 'Inline production'));
+      assert.equal(vscode.languages.getDiagnostics(uri).length, 0);
+      report.push('Check saved configuration through VS Code launch');
+      assert.ok(await vscode.commands.executeCommand('mathprog.run', 'Inline production'));
+      report.push('Run saved inline-data configuration');
+      const makeFile = async (relative, text) => {
+        const file = vscode.Uri.joinPath(workspaceFolder.uri, relative);
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(file.fsPath)));
+        await vscode.workspace.fs.writeFile(file, Buffer.from(text)); return file;
+      };
+      const model = await makeFile('models/experiment.mod', 'set P;\nparam limit{P};\nvar x{P} >= 0;\nmaximize Profit: sum {i in P} x[i];\nsubject to Capacity{i in P}: x[i] <= limit[i];\nsolve;\nprintf "%g", Profit > "result.txt";\ndata;\nset P := inline;\nparam limit := inline 3;\nend;\n');
+      const sets = await makeFile('inputs/products.dat', 'data;\nset P := a b;\nend;\n');
+      const values = await makeFile('inputs/scenario.dat', 'data;\nparam limit := a 7 b 5;\nend;\n');
+      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(workspaceFolder.uri, 'results with spaces'));
+      const scenario = { ...initial, name: 'Scenario A', model: '${workspaceFolder}/models/experiment.mod',
+        data: ['${workspaceFolder}/inputs/products.dat', '${workspaceFolder}/inputs/scenario.dat'], cwd: '${workspaceFolder}/results with spaces' };
+      assert.ok(await vscode.commands.executeCommand('mathprog.createConfiguration', scenario));
+      const dataDoc = await vscode.workspace.openTextDocument(values);
       await vscode.window.showTextDocument(dataDoc);
-      assert.equal(dataDoc.languageId, 'mathprog'); report.push('Data file association');
-      const datCompletion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', datUri, new vscode.Position(1, 2));
-      assert.ok(datCompletion.items.some(item => item.label === 'param')); report.push('Data keyword completion');
-      await vscode.commands.executeCommand('mathprog.run');
-      assert.equal(fs.readFileSync(path.join(folder, 'dat-result.txt'), 'utf8'), '7');
-      report.push('Run from data with matching model (external data overrides inline data)');
+      assert.equal(dataDoc.languageId, 'mathprog');
+      const completion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', values, new vscode.Position(1, 2));
+      assert.ok(completion.items.some(item => item.label === 'param'));
+      report.push('Data file language association and completion');
+      const resultPath = path.join(folder, 'results with spaces/result.txt');
+      assert.ok(await vscode.commands.executeCommand('mathprog.run', 'Scenario A'));
+      assert.equal(fs.readFileSync(resultPath, 'utf8'), '12');
+      assert.ok(!fs.existsSync(path.join(folder, 'result.txt')));
+      report.push('Explicit model and two differently named data files run in configured working directory');
       const changeData = async text => {
         const edit = new vscode.WorkspaceEdit();
-        edit.replace(datUri, new vscode.Range(dataDoc.positionAt(0), dataDoc.positionAt(dataDoc.getText().length)), text);
+        edit.replace(values, new vscode.Range(dataDoc.positionAt(0), dataDoc.positionAt(dataDoc.getText().length)), text);
         assert.ok(await vscode.workspace.applyEdit(edit));
       };
-      await changeData('data;\nparam limit := oops;\nend;\n');
-      await vscode.commands.executeCommand('mathprog.check');
-      assert.ok(vscode.languages.getDiagnostics(datUri).some(d => d.range.start.line === 1));
-      report.push('Data error diagnostics');
-      await changeData('data;\nparam limit := 7;\nend;\n');
-      const alternate = vscode.Uri.file(path.join(folder, 'alternate.mod'));
-      await vscode.workspace.fs.writeFile(alternate, Buffer.from(modelText.replace('x <= limit;', 'x <= limit / 2;')));
-      await vscode.commands.executeCommand('mathprog.selectModel', alternate);
-      await vscode.commands.executeCommand('mathprog.run');
-      assert.equal(fs.readFileSync(path.join(folder, 'dat-result.txt'), 'utf8'), '3.5');
-      assert.equal(vscode.languages.getDiagnostics(datUri).length, 0);
-      report.push('Explicit model selection from data and cleared diagnostics');
-      await changeData('data;\nparam limit := 12;\nend;\n');
+      await changeData('data;\nparam limit := a oops b 5;\nend;\n');
+      assert.ok(await vscode.commands.executeCommand('mathprog.check', 'Scenario A'));
+      assert.ok(vscode.languages.getDiagnostics(values).some(d => d.range.start.line === 1 && d.source === 'glpsol'));
+      report.push('Diagnostics for second data file in configuration');
+      await changeData('data;\nparam limit := a 10 b 5;\nend;\n');
       assert.ok(dataDoc.isDirty);
-      await vscode.commands.executeCommand('mathprog.run');
-      assert.equal(dataDoc.isDirty, false);
-      assert.equal(fs.readFileSync(path.join(folder, 'dat-result.txt'), 'utf8'), '6');
-      report.push('Remembered model selection and saving edited data before running');
+      assert.ok(await vscode.commands.executeCommand('mathprog.run', 'Scenario A'));
+      assert.equal(dataDoc.isDirty, false); assert.equal(fs.readFileSync(resultPath, 'utf8'), '15');
+      assert.equal(vscode.languages.getDiagnostics(values).length, 0);
+      report.push('Save changed configured inputs and clear corrected diagnostics');
+      const inline = { ...scenario, name: 'Inline experiment', data: [] };
+      assert.ok(await vscode.commands.executeCommand('mathprog.createConfiguration', inline));
+      await vscode.window.showTextDocument(dataDoc);
+      assert.equal(await vscode.commands.executeCommand('mathprog.selectConfiguration', 'Inline experiment'), 'Inline experiment');
+      assert.ok(await vscode.commands.executeCommand('mathprog.run'));
+      assert.equal(fs.readFileSync(resultPath, 'utf8'), '3');
+      report.push('Selected configuration is used regardless of active data filename');
+      fs.unlinkSync(resultPath);
+      assert.ok(await vscode.commands.executeCommand('mathprog.check', 'Scenario A'));
+      assert.ok(!fs.existsSync(resultPath));
+      report.push('Configuration check generates model without solving');
+      const nativeRun = async (name, started) => {
+        let done, timer;
+        const completion = new Promise(resolve => { done = resolve; });
+        const sub = vscode.debug.onDidTerminateDebugSession(session => { if (session.name === name) done(); });
+        try {
+          assert.ok(await vscode.debug.startDebugging(workspaceFolder, name, { noDebug: true }));
+          if (started) await started();
+          await Promise.race([completion, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Native launch did not terminate')), 10000); })]);
+        } finally { sub.dispose(); clearTimeout(timer); }
+      };
+      await nativeRun('Scenario A');
+      assert.equal(fs.readFileSync(resultPath, 'utf8'), '15');
+      report.push('Native Run and Debug launch of named launch.json configuration');
+      if (process.platform !== 'win32') {
+        const fake = await makeFile('fake-glpsol', '#!/bin/sh\nprintf ready > ready.txt\nexec sleep 30\n');
+        fs.chmodSync(fake.fsPath, 0o755);
+        const slow = { ...scenario, name: 'Stop test', glpsolPath: fake.fsPath };
+        assert.ok(await vscode.commands.executeCommand('mathprog.createConfiguration', slow));
+        const ready = path.join(folder, 'results with spaces/ready.txt');
+        if (fs.existsSync(ready)) fs.unlinkSync(ready);
+        await nativeRun('Stop test', async () => {
+          const deadline = Date.now() + 5000;
+          while (!fs.existsSync(ready) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+          assert.ok(fs.existsSync(ready));
+          assert.ok(vscode.debug.activeDebugSession?.name === 'Stop test');
+          await vscode.debug.stopDebugging(vscode.debug.activeDebugSession);
+        });
+        assert.ok(await vscode.commands.executeCommand('mathprog.run', 'Scenario A'));
+        assert.equal(fs.readFileSync(resultPath, 'utf8'), '15');
+        report.push('Native Stop terminates running solver and allows next run');
+      }
+      const launchConfiguration = vscode.workspace.getConfiguration('launch', workspaceFolder.uri);
+      const configs = launchConfiguration.get('configurations');
+      await launchConfiguration.update('configurations', [...configs, { ...initial, name: 'Missing input', model: '${workspaceFolder}/missing.mod' }], vscode.ConfigurationTarget.WorkspaceFolder);
+      assert.equal(await vscode.debug.startDebugging(workspaceFolder, 'Missing input', { noDebug: true }), false);
+      report.push('Missing configured input rejects launch before starting process');
+      assert.equal(await vscode.commands.executeCommand('mathprog.createConfiguration', scenario), false);
+      assert.equal(vscode.workspace.getConfiguration('launch', workspaceFolder.uri).get('configurations').filter(c => c.name === 'Scenario A').length, 1);
+      report.push('Duplicate creation preserves existing configuration');
     } else report.push('Execution skipped: untrusted workspace');
     fs.writeFileSync(reportFile, JSON.stringify({ passed: true, checks: report }, null, 2));
   } catch (error) {

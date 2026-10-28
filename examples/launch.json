@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "mathprog",
+      "request": "launch",
+      "name": "Production: inline data",
+      "model": "${workspaceFolder}/examples/production.mod",
+      "data": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "mathprog",
+      "request": "launch",
+      "name": "Production: external data",
+      "model": "${workspaceFolder}/examples/production.mod",
+      "data": [
+        "${workspaceFolder}/examples/production.dat"
+      ],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

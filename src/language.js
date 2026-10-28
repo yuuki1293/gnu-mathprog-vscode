@@ -115,7 +115,7 @@ function parseDiagnostics(output, cwd) {
 
 function solverArgs(model, data, check, limit) {
   const args = ['--model', model];
-  if (data) args.push('--data', data);
+  for (const file of typeof data === 'string' ? [data] : data || []) args.push('--data', file);
   if (check) args.push('--check');
   args.push('--tmlim', String(limit));
   return args;

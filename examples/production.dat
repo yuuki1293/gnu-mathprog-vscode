@@ -1,4 +1,4 @@
-# Use with production.mod via MathProg: Select Data File.
+# Use with production.mod in a MathProg launch.json configuration.
 # This replaces the model's inline data. Expected profit: 400.
 data;
 set PRODUCTS := chair table;

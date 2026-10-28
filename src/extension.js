@@ -3,23 +3,21 @@ const vscode = require('vscode');
 const path = require('node:path');
 const { help, keywords, mask, declarations, parseDiagnostics, solverArgs } = require('./language');
 const { runSolver } = require('./solver');
+const { initialConfiguration, resolveRunConfiguration, workspacePath } = require('./configuration');
+const { RunDebugAdapter } = require('./debugAdapter');
 
 function activate(context) {
   const selector = { language: 'mathprog' };
   const output = vscode.window.createOutputChannel('GNU MathProg');
   const diagnostics = vscode.languages.createDiagnosticCollection('mathprog');
   let busy = false;
-  let activeCancellation;
-  const diagnosticFiles = new Map();
-  const dataKey = uri => `data:${uri.toString()}`;
-  const modelKey = uri => `model:${uri.toString()}`;
-  const isData = doc => /\.dat$/i.test(doc.fileName);
+  const activeCancellations = new Set();
   const symbolKind = kind => kind === 'set' ? vscode.SymbolKind.Array : kind === 'param' ? vscode.SymbolKind.Constant : kind === 'var' ? vscode.SymbolKind.Variable : vscode.SymbolKind.Function;
   const isCode = (doc, position) => {
     const prefix = doc.getText().slice(0, doc.offsetAt(position));
     return mask(prefix + 'X').endsWith('X');
   };
-  context.subscriptions.push(output, diagnostics, { dispose: () => activeCancellation?.cancel() });
+  context.subscriptions.push(output, diagnostics, { dispose: () => { for (const source of activeCancellations) source.cancel(); } });
   context.subscriptions.push(vscode.languages.registerCompletionItemProvider(selector, {
     provideCompletionItems(doc, position) {
       if (!isCode(doc, position)) return [];
@@ -67,145 +65,201 @@ function activate(context) {
     }
   }));
 
-  function activeDocument() {
-    const doc = vscode.window.activeTextEditor?.document;
-    if (!doc || doc.languageId !== 'mathprog' || doc.uri.scheme !== 'file') {
-      vscode.window.showWarningMessage('MathProg のモデルまたはデータファイルを開いてください。');
+  const configurationKey = entry => `${entry.folder.uri.toString()}#${entry.config.name}`;
+  function entries() {
+    return (vscode.workspace.workspaceFolders || []).filter(folder => folder.uri.scheme === 'file').flatMap(folder =>
+      vscode.workspace.getConfiguration('launch', folder.uri).get('configurations', [])
+        .filter(config => config.type === 'mathprog' && config.request === 'launch')
+        .map(config => ({ folder, config })));
+  }
+  async function chooseConfiguration(name, forcePick = false) {
+    const available = entries();
+    let candidates = name ? available.filter(entry => entry.config.name === name || configurationKey(entry) === name) : available;
+    if (!candidates.length) {
+      if (name) throw new Error(`実行構成が見つかりません: ${name}`);
+      const choice = await vscode.window.showInformationMessage('MathProg の実行構成を launch.json に作成してください。', '実行構成を作成');
+      if (choice) await createConfiguration();
       return;
     }
-    return doc;
+    let selected;
+    if (!name && !forcePick) {
+      const key = context.workspaceState.get('selectedConfiguration');
+      selected = candidates.find(entry => configurationKey(entry) === key);
+    }
+    if (!selected && candidates.length === 1 && !forcePick) selected = candidates[0];
+    if (!selected) {
+      const pick = await vscode.window.showQuickPick(candidates.map(entry => ({
+        label: entry.config.name, description: entry.folder.name, detail: entry.config.model, entry
+      })), { title: 'MathProg の実行構成', placeHolder: '実行するモデルとデータの組み合わせを選択' });
+      selected = pick?.entry;
+    }
+    if (selected) await context.workspaceState.update('selectedConfiguration', configurationKey(selected));
+    return selected;
   }
-  function activeModel() {
-    const doc = activeDocument();
-    if (doc && isData(doc)) {
-      vscode.window.showWarningMessage('モデルファイルを開いてください。データ側では「Select Model File for Data」でモデルを選択できます。');
-      return;
-    }
-    return doc;
+  async function configurationFolder() {
+    const folders = (vscode.workspace.workspaceFolders || []).filter(folder => folder.uri.scheme === 'file');
+    if (!folders.length) throw new Error('実行構成を保存するフォルダーを VS Code で開いてください。');
+    const active = vscode.window.activeTextEditor?.document.uri;
+    const folder = active && vscode.workspace.getWorkspaceFolder(active);
+    if (folder?.uri.scheme === 'file') return folder;
+    if (folders.length === 1) return folders[0];
+    return (await vscode.window.showQuickPick(folders.map(folder => ({ label: folder.name, folder })),
+      { title: '実行構成を保存するフォルダー' }))?.folder;
   }
-  async function isModelFile(uri) {
-    if (uri?.scheme !== 'file' || !/\.(mod|mpl|mathprog)$/i.test(uri.fsPath)) return false;
-    try { return Boolean((await vscode.workspace.fs.stat(uri)).type & vscode.FileType.File); }
-    catch (error) { if (error.code === 'FileNotFound') return false; throw error; }
+  async function createConfiguration(draft) {
+    const folder = await configurationFolder(); if (!folder) return;
+    const launch = vscode.workspace.getConfiguration('launch', folder.uri);
+    const existing = launch.get('configurations', []);
+    if (!draft) {
+      const model = (await vscode.window.showOpenDialog({ canSelectMany: false,
+        defaultUri: folder.uri, filters: { 'MathProg model': ['mod', 'mpl', 'mathprog'] }, title: '実行するモデルを選択' }))?.[0];
+      if (!model) return;
+      const mode = await vscode.window.showQuickPick(['モデル内のデータを使う', '外部のデータファイルを使う'], { title: 'データの指定' });
+      if (!mode) return;
+      let data = [];
+      if (mode === '外部のデータファイルを使う') {
+        const files = await vscode.window.showOpenDialog({ canSelectMany: true, defaultUri: folder.uri,
+          filters: { 'MathProg data': ['dat'], 'All files': ['*'] }, title: 'データファイルを選択（最大10件）' });
+        if (!files?.length) return;
+        data = files.map(uri => workspacePath(folder.uri.fsPath, uri.fsPath));
+      }
+      const name = await vscode.window.showInputBox({ title: '実行構成の名前', value: path.basename(model.fsPath, path.extname(model.fsPath)),
+        validateInput: value => !value.trim() ? '名前を入力してください。' : existing.some(c => c.name === value.trim()) ? '別の名前を指定してください。' : undefined });
+      if (!name) return;
+      draft = { ...initialConfiguration, name: name.trim(), model: workspacePath(folder.uri.fsPath, model.fsPath), data };
+    }
+    if (existing.some(config => config.name === draft.name)) throw new Error(`同名の実行構成があります: ${draft.name}`);
+    // Validate structure without evaluating variable expressions or executing anything.
+    resolveRunConfiguration({ ...draft, model: draft.model?.replace(/\$\{workspaceFolder\}/g, folder.uri.fsPath),
+      data: Array.isArray(draft.data) ? draft.data.map(file => typeof file === 'string' ? file.replace(/\$\{workspaceFolder\}/g, folder.uri.fsPath) : file) : draft.data,
+      cwd: draft.cwd?.replace(/\$\{workspaceFolder\}/g, folder.uri.fsPath) }, folder.uri.fsPath);
+    const launchUri = vscode.Uri.joinPath(folder.uri, '.vscode', 'launch.json');
+    const openLaunch = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === launchUri.toString());
+    if (openLaunch?.isDirty) throw new Error('編集中の launch.json を保存してから実行構成を追加してください。');
+    if (!launch.get('version')) await launch.update('version', '0.2.0', vscode.ConfigurationTarget.WorkspaceFolder);
+    await launch.update('configurations', [...existing, draft], vscode.ConfigurationTarget.WorkspaceFolder);
+    await context.workspaceState.update('selectedConfiguration', configurationKey({ folder, config: draft }));
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(launchUri));
+    return draft;
   }
-  async function selectModel(dataDoc, modelUri) {
-    if (!modelUri) {
-      const files = await vscode.window.showOpenDialog({ canSelectMany: false,
-        defaultUri: vscode.Uri.file(path.dirname(dataDoc.fileName)),
-        filters: { 'MathProg model': ['mod', 'mpl', 'mathprog'] },
-        title: `${path.basename(dataDoc.fileName)} に使用するモデル` });
-      modelUri = files?.[0];
+  async function validateFiles(config) {
+    for (const file of [config.model, ...config.data]) {
+      let stat;
+      try { stat = await vscode.workspace.fs.stat(vscode.Uri.file(file)); }
+      catch { throw new Error(`入力ファイルが見つかりません: ${file}`); }
+      if (!(stat.type & vscode.FileType.File)) throw new Error(`ファイルを指定してください: ${file}`);
     }
-    if (!modelUri) return;
-    if (!(await isModelFile(modelUri))) {
-      vscode.window.showWarningMessage('既存のモデルファイル (.mod / .mpl / .mathprog) を選択してください。'); return;
-    }
-    await context.workspaceState.update(modelKey(dataDoc.uri), modelUri.fsPath);
-    return vscode.workspace.openTextDocument(modelUri);
+    let stat;
+    try { stat = await vscode.workspace.fs.stat(vscode.Uri.file(config.cwd)); }
+    catch { throw new Error(`作業フォルダーが見つかりません: ${config.cwd}`); }
+    if (!(stat.type & vscode.FileType.Directory)) throw new Error(`cwd にフォルダーを指定してください: ${config.cwd}`);
   }
-  async function modelForData(dataDoc) {
-    const remembered = context.workspaceState.get(modelKey(dataDoc.uri));
-    if (remembered) {
-      const uri = vscode.Uri.file(remembered);
-      if (await isModelFile(uri)) return vscode.workspace.openTextDocument(uri);
-    }
-    const stem = dataDoc.fileName.replace(/\.dat$/i, '');
-    const candidates = [];
-    for (const extension of ['.mod', '.mpl', '.mathprog']) {
-      const uri = vscode.Uri.file(stem + extension);
-      if (await isModelFile(uri)) candidates.push(uri);
-    }
-    if (candidates.length === 1) return selectModel(dataDoc, candidates[0]);
-    return selectModel(dataDoc);
-  }
-  async function execute(check) {
-    if (!vscode.workspace.isTrusted) {
-      vscode.window.showWarningMessage('GLPK の実行には、ワークスペースを信頼する必要があります。'); return;
-    }
-    if (busy) { vscode.window.showInformationMessage('MathProg は実行中です。通知のキャンセルから停止できます。'); return; }
-    const active = activeDocument();
-    if (!active) return;
+  async function execute(raw, folder, token, stream) {
+    if (!vscode.workspace.isTrusted) throw new Error('GLPK の実行には、ワークスペースを信頼する必要があります。');
+    if (busy) throw new Error('MathProg は実行中です。停止してから別の構成を実行してください。');
     busy = true;
     try {
-      const doc = isData(active) ? await modelForData(active) : active;
-      if (!doc || !(await doc.save())) return;
-      const data = isData(active) ? active.fileName : context.workspaceState.get(dataKey(doc.uri));
-      const dataDoc = data && vscode.workspace.textDocuments.find(d => d.uri.fsPath === data);
-      if (dataDoc?.isDirty && !(await dataDoc.save())) return;
-      if (data) await vscode.workspace.fs.stat(vscode.Uri.file(data));
-      const version = doc.version;
-      const dataVersion = dataDoc?.version;
-      const config = vscode.workspace.getConfiguration('mathprog', doc.uri);
-      const executable = config.get('glpsolPath', 'glpsol');
-      const limit = Math.max(1, Math.min(86400, config.get('timeLimit', 60)));
-      const args = solverArgs(doc.fileName, data, check, limit);
-      const cwd = path.dirname(doc.fileName);
-      for (const uri of diagnosticFiles.get(doc.uri.toString()) || []) diagnostics.delete(uri);
-      diagnosticFiles.delete(doc.uri.toString());
-      output.clear(); output.show(true);
-      output.appendLine(`${check ? 'Check' : 'Run'}: ${doc.fileName}`);
-      if (data) output.appendLine(`Data: ${data}`);
-      output.appendLine(`Executable: ${executable}\n`);
-      const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: check ? 'MathProg: モデルを検査中' : 'MathProg: モデルを実行中', cancellable: true },
-        async (_, token) => {
-          const source = new vscode.CancellationTokenSource();
-          activeCancellation = source;
-          const sub = token.onCancellationRequested(() => source.cancel());
-          if (token.isCancellationRequested) source.cancel();
-          try { return await runSolver(executable, args, { cwd, timeoutMs: (limit + 5) * 1000 }, source.token, text => output.append(text)); }
-          finally { sub.dispose(); source.dispose(); activeCancellation = undefined; }
-        });
+      const defaults = vscode.workspace.getConfiguration('mathprog', folder.uri);
+      const config = resolveRunConfiguration(raw, folder.uri.fsPath, { glpsolPath: defaults.get('glpsolPath'), timeLimit: defaults.get('timeLimit') });
+      await validateFiles(config);
+      const docs = [];
+      for (const file of [config.model, ...config.data]) {
+        if (token.isCancellationRequested) return { cancelled: true };
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+        if (doc.isDirty && !(await doc.save())) return { cancelled: true };
+        docs.push({ doc, version: doc.version });
+      }
+      diagnostics.clear(); output.clear(); output.show(true);
+      const append = text => { output.append(text); stream(text); };
+      append(`Configuration: ${config.name}\n${config.action === 'check' ? 'Check' : 'Run'}: ${config.model}\n`);
+      for (const file of config.data) append(`Data: ${file}\n`);
+      append(`Working directory: ${config.cwd}\nExecutable: ${config.glpsolPath}\n\n`);
+      if (token.isCancellationRequested) return { cancelled: true };
+      const result = await runSolver(config.glpsolPath, solverArgs(config.model, config.data, config.action === 'check', config.timeLimit),
+        { cwd: config.cwd, timeoutMs: (config.timeLimit + 5) * 1000 }, token, append);
       if (result.cancelled) {
-        output.appendLine(result.timedOut ? '\n制限時間を超えたため停止しました。' : '\nキャンセルしました。'); return;
+        append(result.timedOut ? '\n制限時間を超えたため停止しました。\n' : '\nキャンセルしました。\n'); return result;
       }
-      if (doc.version === version && (!dataDoc || dataDoc.version === dataVersion)) {
+      if (docs.every(({ doc, version }) => doc.version === version)) {
+        const inputs = new Set([config.model, ...config.data]);
         const groups = new Map();
-        for (const item of parseDiagnostics(result.output, cwd)) {
-          // Only model/data inputs are known to have been read by this invocation.
-          if (item.file !== doc.fileName && item.file !== data) continue;
-          const uri = vscode.Uri.file(item.file);
-          const range = new vscode.Range(item.line, 0, item.line, 10000);
-          const diagnostic = new vscode.Diagnostic(range, item.message, vscode.DiagnosticSeverity.Error);
+        for (const item of parseDiagnostics(result.output, config.cwd)) {
+          if (!inputs.has(item.file)) continue;
+          const diagnostic = new vscode.Diagnostic(new vscode.Range(item.line, 0, item.line, 10000), item.message, vscode.DiagnosticSeverity.Error);
           diagnostic.source = 'glpsol';
-          if (!groups.has(item.file)) groups.set(item.file, { uri, items: [] });
-          groups.get(item.file).items.push(diagnostic);
+          if (!groups.has(item.file)) groups.set(item.file, []);
+          groups.get(item.file).push(diagnostic);
         }
-        for (const { uri, items } of groups.values()) diagnostics.set(uri, items);
-        diagnosticFiles.set(doc.uri.toString(), [...groups.values()].map(g => g.uri));
+        for (const [file, items] of groups) diagnostics.set(vscode.Uri.file(file), items);
       }
-      output.appendLine(`\nExit code: ${result.code}`);
-      if (result.code !== 0) vscode.window.showErrorMessage('MathProg の処理に失敗しました。「GNU MathProg」の出力と「問題」を確認してください。');
-      else vscode.window.showInformationMessage(check ? 'MathProg: モデルの検査が完了しました。' : 'MathProg: 実行が完了しました。解の状態は出力で確認してください。');
+      append(`\nExit code: ${result.code}\n`);
+      if (result.code !== 0) vscode.window.showErrorMessage('MathProg の処理に失敗しました。出力と「問題」を確認してください。');
+      return result;
     } catch (error) {
-      const message = error.code === 'ENOENT' ? 'glpsol が見つかりません。GLPK をインストールし、mathprog.glpsolPath を設定してください。' : `MathProg: ${error.message}`;
+      const message = error.code === 'ENOENT' ? 'glpsol が見つかりません。GLPK をインストールし、glpsolPath を設定してください。' : `MathProg: ${error.message}`;
       output.appendLine(message); output.show(true); vscode.window.showErrorMessage(message);
+      throw new Error(message);
     } finally { busy = false; }
   }
-  const command = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(`mathprog.${id}`, fn));
-  command('run', () => execute(false)); command('check', () => execute(true));
-  command('showOutput', () => output.show());
-  command('selectData', async () => {
-    const doc = activeModel(); if (!doc) return;
-    const files = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { 'MathProg data': ['dat'], 'All files': ['*'] }, title: 'モデルに使用するデータファイル' });
-    if (files?.length) {
-      await context.workspaceState.update(dataKey(doc.uri), files[0].fsPath);
-      await context.workspaceState.update(modelKey(files[0]), doc.fileName);
-      vscode.window.showInformationMessage(`データを選択しました: ${path.basename(files[0].fsPath)}`);
+  const provider = {
+    provideDebugConfigurations: () => [{ ...initialConfiguration, data: [] }],
+    resolveDebugConfiguration(folder, config) {
+      if (!vscode.workspace.isTrusted) { vscode.window.showWarningMessage('GLPK の実行には、ワークスペースを信頼する必要があります。'); return null; }
+      if (!folder || folder.uri.scheme !== 'file') { vscode.window.showErrorMessage('実行構成を保存したフォルダーを開いてください。'); return null; }
+      return config;
+    },
+    async resolveDebugConfigurationWithSubstitutedVariables(folder, raw) {
+      try {
+        const defaults = vscode.workspace.getConfiguration('mathprog', folder.uri);
+        const resolved = resolveRunConfiguration(raw, folder.uri.fsPath, { glpsolPath: defaults.get('glpsolPath'), timeLimit: defaults.get('timeLimit') });
+        await validateFiles(resolved);
+        return { ...raw, ...resolved };
+      } catch (error) { vscode.window.showErrorMessage(`MathProg: ${error.message}`); return null; }
     }
-  });
-  command('selectModel', async modelUri => {
-    const doc = activeDocument(); if (!doc) return;
-    if (!isData(doc)) { vscode.window.showWarningMessage('.dat ファイルを開いてモデルを選択してください。'); return; }
+  };
+  context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('mathprog', provider));
+  context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('mathprog', {
+    createDebugAdapterDescriptor(session) {
+      const cancellation = new vscode.CancellationTokenSource();
+      activeCancellations.add(cancellation);
+      const adapter = new RunDebugAdapter((config, token, stream) => execute(config, session.workspaceFolder, token, stream),
+        new vscode.EventEmitter(), cancellation);
+      const dispose = adapter.dispose.bind(adapter);
+      adapter.dispose = () => { activeCancellations.delete(cancellation); dispose(); };
+      return new vscode.DebugAdapterInlineImplementation(adapter);
+    }
+  }));
+  context.subscriptions.push(vscode.debug.onDidStartDebugSession(session => {
+    if (session.type === 'mathprog' && session.workspaceFolder) {
+      void context.workspaceState.update('selectedConfiguration', configurationKey({ folder: session.workspaceFolder, config: session.configuration }));
+    }
+  }));
+  async function launch(check, name) {
+    if (!vscode.workspace.isTrusted) { vscode.window.showWarningMessage('GLPK の実行には、ワークスペースを信頼する必要があります。'); return false; }
+    if (busy) { vscode.window.showInformationMessage('MathProg は実行中です。停止してから実行してください。'); return false; }
+    const entry = await chooseConfiguration(name); if (!entry) return false;
+    const runId = `${Date.now()}-${Math.random()}`;
+    let done;
+    const completion = new Promise(resolve => { done = resolve; });
+    const sub = vscode.debug.onDidTerminateDebugSession(session => {
+      if (session.configuration.__mathprogRunId === runId) done(true);
+    });
     try {
-      const model = await selectModel(doc, modelUri);
-      if (model) vscode.window.showInformationMessage(`モデルを選択しました: ${path.basename(model.fileName)}`);
-    } catch (error) { vscode.window.showErrorMessage(`MathProg: ${error.message}`); }
-  });
-  command('clearData', async () => {
-    const doc = activeModel(); if (!doc) return;
-    await context.workspaceState.update(dataKey(doc.uri), undefined);
-    vscode.window.showInformationMessage('データファイルの選択を解除しました。');
-  });
+      const started = await vscode.debug.startDebugging(entry.folder, { ...entry.config,
+        action: check ? 'check' : entry.config.action || 'run', __mathprogRunId: runId }, { noDebug: true });
+      if (!started) return false;
+      return await completion;
+    } finally { sub.dispose(); }
+  }
+  const command = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(`mathprog.${id}`, async (...args) => {
+    try { return await fn(...args); }
+    catch (error) { vscode.window.showErrorMessage(`MathProg: ${error.message}`); return false; }
+  }));
+  command('run', name => launch(false, name));
+  command('check', name => launch(true, name));
+  command('showOutput', () => output.show());
+  command('createConfiguration', draft => createConfiguration(draft));
+  command('selectConfiguration', name => chooseConfiguration(name, !name).then(entry => entry?.config.name));
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => diagnostics.delete(event.document.uri)));
 }
 module.exports = { activate };

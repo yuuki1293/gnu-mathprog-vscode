@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Replace filename-based model discovery and per-file model/data choices with explicit `.vscode/launch.json` configurations.
+- Add Create Run Configuration and Select Run Configuration commands, schema completion, and native VS Code launch/stop integration.
+- Support ordered lists of data files, working directories, per-configuration solver paths and time limits, and check-only configurations.
+- Preserve existing launch configurations and JSONC comments when adding a configuration.
+
+
 ## 0.3.0
 
 - Show comments directly preceding a declaration below its definition in symbol hovers.

@@ -2,7 +2,7 @@
   "name": "gnu-mathprog",
   "displayName": "GNU MathProg",
   "description": "GNU MathProg editing and GLPK execution support for VS Code.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "mathprog-local",
   "license": "MIT",
   "engines": {
@@ -21,7 +21,8 @@
   ],
   "main": "./src/extension.js",
   "activationEvents": [
-    "onLanguage:mathprog"
+    "onLanguage:mathprog",
+    "onDebug:mathprog"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -32,7 +33,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.3.0.vsix"
+    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.4.0.vsix"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.6.0",
@@ -73,34 +74,29 @@
     "commands": [
       {
         "command": "mathprog.run",
-        "title": "Run Model",
+        "title": "Run Configuration",
         "category": "MathProg",
         "icon": "$(play)"
       },
       {
         "command": "mathprog.check",
-        "title": "Check Model",
+        "title": "Check Configuration",
         "category": "MathProg",
         "icon": "$(check)"
       },
       {
-        "command": "mathprog.selectData",
-        "title": "Select Data File",
+        "command": "mathprog.createConfiguration",
+        "title": "Create Run Configuration",
         "category": "MathProg"
       },
       {
-        "command": "mathprog.clearData",
-        "title": "Clear Data File",
+        "command": "mathprog.selectConfiguration",
+        "title": "Select Run Configuration",
         "category": "MathProg"
       },
       {
         "command": "mathprog.showOutput",
         "title": "Show Output",
-        "category": "MathProg"
-      },
-      {
-        "command": "mathprog.selectModel",
-        "title": "Select Model File for Data",
         "category": "MathProg"
       }
     ],
@@ -117,8 +113,8 @@
           "group": "navigation"
         },
         {
-          "command": "mathprog.selectModel",
-          "when": "resourceLangId == mathprog && resourceExtname =~ /\\.dat$/i",
+          "command": "mathprog.selectConfiguration",
+          "when": "resourceLangId == mathprog",
           "group": "mathprog@1"
         }
       ]
@@ -140,7 +136,87 @@
           "description": "Solver time limit in seconds. A separate watchdog stops a process after this limit plus 5 seconds."
         }
       }
-    }
+    },
+    "debuggers": [
+      {
+        "type": "mathprog",
+        "label": "GNU MathProg",
+        "languages": [
+          "mathprog"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "model"
+            ],
+            "properties": {
+              "model": {
+                "type": "string",
+                "description": "実行するモデルファイル。相対パスはワークスペースフォルダーが基準です。",
+                "default": "${workspaceFolder}/model.mod"
+              },
+              "data": {
+                "type": "array",
+                "description": "データファイルを読み込む順に指定。空の配列ではモデル内のデータを使用します。",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "GLPKを実行する作業フォルダー。既定はワークスペースフォルダー。",
+                "default": "${workspaceFolder}"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "run",
+                  "check"
+                ],
+                "default": "run",
+                "description": "モデルの実行または生成の検査。"
+              },
+              "glpsolPath": {
+                "type": "string",
+                "description": "この構成で使うglpsolの名前またはパス。省略時はmathprog.glpsolPath。"
+              },
+              "timeLimit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400,
+                "description": "この構成の制限時間（秒）。省略時はmathprog.timeLimit。"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "mathprog",
+            "request": "launch",
+            "name": "MathProg: Run",
+            "model": "${workspaceFolder}/model.mod",
+            "data": [],
+            "cwd": "${workspaceFolder}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "MathProg: Run model",
+            "description": "モデルとデータを指定する実行構成",
+            "body": {
+              "type": "mathprog",
+              "request": "launch",
+              "name": "MathProg: Run",
+              "model": "${workspaceFolder}/model.mod",
+              "data": [],
+              "cwd": "${workspaceFolder}"
+            }
+          }
+        ]
+      }
+    ]
   },
   "repository": {
     "type": "git",

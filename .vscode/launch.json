@@ -7,6 +7,7 @@
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}",
         "${workspaceFolder}/examples/production.mod"
       ]
     }
