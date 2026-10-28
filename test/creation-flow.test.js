@@ -55,6 +55,7 @@ function fixture(options = {}) {
   vm.runInNewContext(fs.readFileSync(path.join(src, 'extension.js'), 'utf8'), {
     module: mod, require: id => id === 'vscode' ? vscode : id === './automaticAnalysis'
       ? { registerAutomaticAnalysis: () => ({ schedule() {}, async pause() {}, resume() {} }) }
+      : id === './refactoringProvider' ? { registerRefactoring() {} }
       : require(id.startsWith('./') ? path.join(src, id) : id)
   }, { filename: 'extension.js' });
   mod.exports.activate({ subscriptions: [], workspaceState: memento(state), globalState: memento(global) });

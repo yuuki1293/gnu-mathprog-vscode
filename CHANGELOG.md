@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Add F2 Rename Symbol and Shift+F12 Find All References for model objects and data headers.
+- Include configured data files across all scenarios using the same model; support initiating rename from data files.
+- Preserve comments, strings, data labels, local indices, suffixes, and external table column names.
+- Validate name collisions and reject ambiguous changes to data shared by different models.
+- Use unsaved editor contents and native WorkspaceEdit previews/undo without saving files or invoking GLPK.
+
 ## 0.5.0
 
 - Automatically check the selected launch configuration after saving model/data inputs, opening inputs, and changing configuration.

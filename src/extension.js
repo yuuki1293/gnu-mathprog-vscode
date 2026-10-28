@@ -6,6 +6,7 @@ const { runSolver } = require('./solver');
 const { initialConfiguration, resolveRunConfiguration, workspacePath } = require('./configuration');
 const { RunDebugAdapter } = require('./debugAdapter');
 const { registerAutomaticAnalysis } = require('./automaticAnalysis');
+const { registerRefactoring } = require('./refactoringProvider');
 
 function activate(context) {
   const selector = { language: 'mathprog' };
@@ -290,6 +291,7 @@ function activate(context) {
     return chooseConfiguration(name, !name).then(entry => entry?.config.name);
   });
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => diagnostics.delete(event.document.uri)));
+  registerRefactoring(context, { getEntries: entries, getSelectedEntry: selectedEntry });
   automatic = registerAutomaticAnalysis(context, { getEntry: selectedEntry, entryCount: () => entries().length,
     validateFiles, clearManualDiagnostics: () => diagnostics.clear() });
   // Opening the first workspace restarts the extension host; continue the requested wizard there.
