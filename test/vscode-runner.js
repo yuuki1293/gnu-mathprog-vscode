@@ -33,6 +33,43 @@ async function run() {
       await vscode.commands.executeCommand('mathprog.check');
       const diagnostics = vscode.languages.getDiagnostics(broken);
       assert.ok(diagnostics.some(d => d.range.start.line === 1 && d.source === 'glpsol')); report.push('Problems diagnostics');
+      // Use a distinct model/data pair so remembered choices cannot affect this test.
+      const datModel = vscode.Uri.file(path.join(folder, 'dat-run.mod'));
+      const datUri = vscode.Uri.file(path.join(folder, 'dat-run.dat'));
+      const modelText = 'param limit;\nvar x >= 0;\nmaximize Profit: x;\nsubject to Capacity: x <= limit;\nsolve;\nprintf "%g", x > "dat-result.txt";\ndata;\nparam limit := 3;\nend;\n';
+      await vscode.workspace.fs.writeFile(datModel, Buffer.from(modelText));
+      await vscode.workspace.fs.writeFile(datUri, Buffer.from('data;\nparam limit := 7;\nend;\n'));
+      const dataDoc = await vscode.workspace.openTextDocument(datUri);
+      await vscode.window.showTextDocument(dataDoc);
+      assert.equal(dataDoc.languageId, 'mathprog'); report.push('Data file association');
+      const datCompletion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', datUri, new vscode.Position(1, 2));
+      assert.ok(datCompletion.items.some(item => item.label === 'param')); report.push('Data keyword completion');
+      await vscode.commands.executeCommand('mathprog.run');
+      assert.equal(fs.readFileSync(path.join(folder, 'dat-result.txt'), 'utf8'), '7');
+      report.push('Run from data with matching model (external data overrides inline data)');
+      const changeData = async text => {
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(datUri, new vscode.Range(dataDoc.positionAt(0), dataDoc.positionAt(dataDoc.getText().length)), text);
+        assert.ok(await vscode.workspace.applyEdit(edit));
+      };
+      await changeData('data;\nparam limit := oops;\nend;\n');
+      await vscode.commands.executeCommand('mathprog.check');
+      assert.ok(vscode.languages.getDiagnostics(datUri).some(d => d.range.start.line === 1));
+      report.push('Data error diagnostics');
+      await changeData('data;\nparam limit := 7;\nend;\n');
+      const alternate = vscode.Uri.file(path.join(folder, 'alternate.mod'));
+      await vscode.workspace.fs.writeFile(alternate, Buffer.from(modelText.replace('x <= limit;', 'x <= limit / 2;')));
+      await vscode.commands.executeCommand('mathprog.selectModel', alternate);
+      await vscode.commands.executeCommand('mathprog.run');
+      assert.equal(fs.readFileSync(path.join(folder, 'dat-result.txt'), 'utf8'), '3.5');
+      assert.equal(vscode.languages.getDiagnostics(datUri).length, 0);
+      report.push('Explicit model selection from data and cleared diagnostics');
+      await changeData('data;\nparam limit := 12;\nend;\n');
+      assert.ok(dataDoc.isDirty);
+      await vscode.commands.executeCommand('mathprog.run');
+      assert.equal(dataDoc.isDirty, false);
+      assert.equal(fs.readFileSync(path.join(folder, 'dat-result.txt'), 'utf8'), '6');
+      report.push('Remembered model selection and saving edited data before running');
     } else report.push('Execution skipped: untrusted workspace');
     fs.writeFileSync(reportFile, JSON.stringify({ passed: true, checks: report }, null, 2));
   } catch (error) {

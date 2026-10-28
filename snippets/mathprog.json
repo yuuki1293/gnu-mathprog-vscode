@@ -85,5 +85,37 @@
       "end;"
     ],
     "description": "Model"
+  },
+  "Data section": {
+    "prefix": "data",
+    "body": [
+      "data;",
+      "$0",
+      "end;"
+    ],
+    "description": "データセクション"
+  },
+  "Data set": {
+    "prefix": "dataset",
+    "body": [
+      "set ${1:PRODUCTS} := ${2:chair table};"
+    ],
+    "description": "集合のデータ"
+  },
+  "Data parameter": {
+    "prefix": "dataparam",
+    "body": [
+      "param ${1:available} := ${2:40};"
+    ],
+    "description": "パラメーターのデータ"
+  },
+  "Data table": {
+    "prefix": "datatable",
+    "body": [
+      "param : ${1:profit hours} :=",
+      "  ${2:chair 20 2}",
+      "  ${3:table 35 4};"
+    ],
+    "description": "複数パラメーターの表形式データ"
   }
 }

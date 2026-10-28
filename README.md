@@ -7,8 +7,8 @@ GNU MathProg (GMPL) のモデル編集と、GLPK の `glpsol` による実行を
 [GitHub Releases](https://github.com/yuuki1293/gnu-mathprog-vscode/releases/latest) から最新版の VSIX をダウンロードできます。
 
 1. VS Code の「拡張機能」ビューを開きます。
-2. 右上の「…」から「VSIX からのインストール」を選び、`gnu-mathprog-0.1.0.vsix` を指定します。
-3. `.mod`、`.mpl`、`.mathprog` ファイルを開きます。
+2. 右上の「…」から「VSIX からのインストール」を選び、`gnu-mathprog-0.2.0.vsix` を指定します。
+3. `.mod`、`.mpl`、`.mathprog`、`.dat` ファイルを開きます。
 
 実行・検査には、別途 **GLPK (`glpsol`)** が必要です。構文ハイライトや補完だけなら GLPK は不要です。
 GLPK は [GNU 公式サイト](https://www.gnu.org/software/glpk/) で配布されています。macOS で Homebrew を使用している場合は `brew install glpk`、Ubuntu/Debian では `sudo apt install glpk-utils` で導入できます。Windows は GLPK の実行ファイルを用意し、設定でその場所を指定してください。
@@ -37,7 +37,7 @@ SSH/WSL/Dev Container 利用時は、拡張が動作するリモート環境に 
 - モデルごとの外部 `.dat` ファイル選択（ワークスペースごとに記憶）
 - 実行キャンセル、制限時間、信頼されたワークスペースでの実行
 
-`.dat` は他言語でも広く使われるため、自動的には関連付けません。MathProg データを編集する場合は右下の言語モードから「GNU MathProg」を選べます。
+`.dat` は GNU MathProg に自動的に関連付けられ、構文ハイライト、キーワード補完、ホバー説明、コメント操作が使えます。データ用のスニペット `data`、`dataset`、`dataparam`、`datatable` も用意しています。ほかの用途の `.dat` には、VS Code の言語モードや `files.associations` で任意の言語を指定できます。
 
 ## 使い方
 
@@ -48,6 +48,12 @@ SSH/WSL/Dev Container 利用時は、拡張が動作するリモート環境に 
 
 外部データを使う場合は、モデルを開いた状態で **MathProg: Select Data File** を実行し、`examples/production.dat` を選択します。モデルを再実行すると目的関数値は **400** になります。選択中のデータパスは実行ログに表示されます。モデル内の `data;` セクションは GLPK の仕様により外部データで置き換わります。
 **MathProg: Clear Data File** でモデル内のデータに戻せます。
+
+### データファイルを開いて実行・検査する
+
+`examples/production.dat` を開いたまま ▶ または **MathProg: Check Model** を実行できます。関連付け済みのモデル、または同じフォルダーにある同名のモデル（`production.mod` など）を使い、開いている `.dat` を外部データとして渡します。同名モデルがない場合や複数ある場合は、モデル選択画面が表示されます。選択をキャンセルすると実行しません。
+
+別名のモデルを使う場合は **MathProg: Select Model File for Data** で選択してください。この対応はデータファイルごとに記憶します。データ側からの実行は、モデル側の **Select Data File** の設定を変更しません。データファイル内のエラーも「問題」に表示します。`.dat` 単独での実行・検査には対応せず、モデルと組み合わせて処理します。
 
 **MathProg: Show Output** で出力を再表示できます。実行中の通知のキャンセル操作で停止できます。
 実行前にモデルと、選択中で開かれているデータファイルを保存します。相対ファイルパスの基準はモデルのあるフォルダーです。

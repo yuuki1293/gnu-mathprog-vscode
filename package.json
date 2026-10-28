@@ -2,7 +2,7 @@
   "name": "gnu-mathprog",
   "displayName": "GNU MathProg",
   "description": "GNU MathProg editing and GLPK execution support for VS Code.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "mathprog-local",
   "license": "MIT",
   "engines": {
@@ -32,7 +32,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.1.0.vsix"
+    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.2.0.vsix"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.6.0",
@@ -51,7 +51,8 @@
         "extensions": [
           ".mod",
           ".mpl",
-          ".mathprog"
+          ".mathprog",
+          ".dat"
         ],
         "configuration": "./language-configuration.json"
       }
@@ -96,6 +97,11 @@
         "command": "mathprog.showOutput",
         "title": "Show Output",
         "category": "MathProg"
+      },
+      {
+        "command": "mathprog.selectModel",
+        "title": "Select Model File for Data",
+        "category": "MathProg"
       }
     ],
     "menus": {
@@ -109,6 +115,11 @@
           "command": "mathprog.check",
           "when": "resourceLangId == mathprog && isWorkspaceTrusted",
           "group": "navigation"
+        },
+        {
+          "command": "mathprog.selectModel",
+          "when": "resourceLangId == mathprog && resourceExtname =~ /\\.dat$/i",
+          "group": "mathprog@1"
         }
       ]
     },

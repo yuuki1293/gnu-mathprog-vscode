@@ -18,7 +18,7 @@
 
 ## VS Code 拡張ホストでの確認
 
-独立したテスト用プロファイルで次の 9 項目を確認しました。
+独立したテスト用プロファイルで次の 15 項目を確認しました。
 
 1. 拡張の起動
 2. `.mod` ファイルの言語関連付け
@@ -29,7 +29,13 @@
 7. モデル検査コマンド
 8. モデル実行コマンド
 9. 構文エラーの「問題」表示
+10. `.dat` ファイルの自動的な言語関連付け
+11. データファイルでのキーワード補完
+12. 同名モデルを使ったデータ側からの実行（モデル内データを外部データで置換）
+13. データファイル内のエラー行を「問題」に表示
+14. データ側から別名モデルを選択して実行し、修正済みの診断が消えること
+15. 選択したモデルの記憶、編集中データの自動保存、変更した値の計算結果への反映
 
-テストランナーは `test/vscode-runner.js` に含まれます。モデルと `mathprog.glpsolPath` を設定した使い捨てのテストワークスペースに対し、VS Code の `--extensionDevelopmentPath` と `--extensionTestsPath` で実行できます。テストは結果をワークスペースの親へ書き込み、ワークスペース内に `broken.mod` を作成します。
+テストランナーは `test/vscode-runner.js` に含まれます。モデルと `mathprog.glpsolPath` を設定した使い捨てのテストワークスペースに対し、VS Code の `--extensionDevelopmentPath` と `--extensionTestsPath` で実行できます。テストは結果をワークスペースの親へ書き込み、ワークスペース内に `broken.mod`、`dat-run.mod`、`dat-run.dat`、`alternate.mod`、`dat-result.txt` を作成します。
 
 Windows / Linux での実機動作確認と Marketplace 公開は行っていません。GLPK は別途導入が必要です。

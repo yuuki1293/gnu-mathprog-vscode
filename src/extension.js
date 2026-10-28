@@ -12,6 +12,8 @@ function activate(context) {
   let activeCancellation;
   const diagnosticFiles = new Map();
   const dataKey = uri => `data:${uri.toString()}`;
+  const modelKey = uri => `model:${uri.toString()}`;
+  const isData = doc => /\.dat$/i.test(doc.fileName);
   const symbolKind = kind => kind === 'set' ? vscode.SymbolKind.Array : kind === 'param' ? vscode.SymbolKind.Constant : kind === 'var' ? vscode.SymbolKind.Variable : vscode.SymbolKind.Function;
   const isCode = (doc, position) => {
     const prefix = doc.getText().slice(0, doc.offsetAt(position));
@@ -61,25 +63,69 @@ function activate(context) {
     }
   }));
 
-  function activeModel() {
+  function activeDocument() {
     const doc = vscode.window.activeTextEditor?.document;
-    if (!doc || doc.languageId !== 'mathprog' || doc.uri.scheme !== 'file' || /\.dat$/i.test(doc.fileName)) {
-      vscode.window.showWarningMessage('MathProg のモデルファイル (.mod / .mpl / .mathprog) を開いてください。');
+    if (!doc || doc.languageId !== 'mathprog' || doc.uri.scheme !== 'file') {
+      vscode.window.showWarningMessage('MathProg のモデルまたはデータファイルを開いてください。');
       return;
     }
     return doc;
+  }
+  function activeModel() {
+    const doc = activeDocument();
+    if (doc && isData(doc)) {
+      vscode.window.showWarningMessage('モデルファイルを開いてください。データ側では「Select Model File for Data」でモデルを選択できます。');
+      return;
+    }
+    return doc;
+  }
+  async function isModelFile(uri) {
+    if (uri?.scheme !== 'file' || !/\.(mod|mpl|mathprog)$/i.test(uri.fsPath)) return false;
+    try { return Boolean((await vscode.workspace.fs.stat(uri)).type & vscode.FileType.File); }
+    catch (error) { if (error.code === 'FileNotFound') return false; throw error; }
+  }
+  async function selectModel(dataDoc, modelUri) {
+    if (!modelUri) {
+      const files = await vscode.window.showOpenDialog({ canSelectMany: false,
+        defaultUri: vscode.Uri.file(path.dirname(dataDoc.fileName)),
+        filters: { 'MathProg model': ['mod', 'mpl', 'mathprog'] },
+        title: `${path.basename(dataDoc.fileName)} に使用するモデル` });
+      modelUri = files?.[0];
+    }
+    if (!modelUri) return;
+    if (!(await isModelFile(modelUri))) {
+      vscode.window.showWarningMessage('既存のモデルファイル (.mod / .mpl / .mathprog) を選択してください。'); return;
+    }
+    await context.workspaceState.update(modelKey(dataDoc.uri), modelUri.fsPath);
+    return vscode.workspace.openTextDocument(modelUri);
+  }
+  async function modelForData(dataDoc) {
+    const remembered = context.workspaceState.get(modelKey(dataDoc.uri));
+    if (remembered) {
+      const uri = vscode.Uri.file(remembered);
+      if (await isModelFile(uri)) return vscode.workspace.openTextDocument(uri);
+    }
+    const stem = dataDoc.fileName.replace(/\.dat$/i, '');
+    const candidates = [];
+    for (const extension of ['.mod', '.mpl', '.mathprog']) {
+      const uri = vscode.Uri.file(stem + extension);
+      if (await isModelFile(uri)) candidates.push(uri);
+    }
+    if (candidates.length === 1) return selectModel(dataDoc, candidates[0]);
+    return selectModel(dataDoc);
   }
   async function execute(check) {
     if (!vscode.workspace.isTrusted) {
       vscode.window.showWarningMessage('GLPK の実行には、ワークスペースを信頼する必要があります。'); return;
     }
     if (busy) { vscode.window.showInformationMessage('MathProg は実行中です。通知のキャンセルから停止できます。'); return; }
-    const doc = activeModel();
-    if (!doc) return;
+    const active = activeDocument();
+    if (!active) return;
     busy = true;
     try {
-      if (!(await doc.save())) return;
-      const data = context.workspaceState.get(dataKey(doc.uri));
+      const doc = isData(active) ? await modelForData(active) : active;
+      if (!doc || !(await doc.save())) return;
+      const data = isData(active) ? active.fileName : context.workspaceState.get(dataKey(doc.uri));
       const dataDoc = data && vscode.workspace.textDocuments.find(d => d.uri.fsPath === data);
       if (dataDoc?.isDirty && !(await dataDoc.save())) return;
       if (data) await vscode.workspace.fs.stat(vscode.Uri.file(data));
@@ -137,7 +183,19 @@ function activate(context) {
   command('selectData', async () => {
     const doc = activeModel(); if (!doc) return;
     const files = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { 'MathProg data': ['dat'], 'All files': ['*'] }, title: 'モデルに使用するデータファイル' });
-    if (files?.length) { await context.workspaceState.update(dataKey(doc.uri), files[0].fsPath); vscode.window.showInformationMessage(`データを選択しました: ${path.basename(files[0].fsPath)}`); }
+    if (files?.length) {
+      await context.workspaceState.update(dataKey(doc.uri), files[0].fsPath);
+      await context.workspaceState.update(modelKey(files[0]), doc.fileName);
+      vscode.window.showInformationMessage(`データを選択しました: ${path.basename(files[0].fsPath)}`);
+    }
+  });
+  command('selectModel', async modelUri => {
+    const doc = activeDocument(); if (!doc) return;
+    if (!isData(doc)) { vscode.window.showWarningMessage('.dat ファイルを開いてモデルを選択してください。'); return; }
+    try {
+      const model = await selectModel(doc, modelUri);
+      if (model) vscode.window.showInformationMessage(`モデルを選択しました: ${path.basename(model.fileName)}`);
+    } catch (error) { vscode.window.showErrorMessage(`MathProg: ${error.message}`); }
   });
   command('clearData', async () => {
     const doc = activeModel(); if (!doc) return;
