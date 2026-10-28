@@ -42,7 +42,11 @@ function activate(context) {
       if (!range) return;
       const word = doc.getText(range);
       const symbol = declarations(doc.getText()).find(item => item.name === word);
-      if (symbol) return new vscode.Hover(new vscode.MarkdownString().appendCodeblock(symbol.detail, 'mathprog'), range);
+      if (symbol) {
+        const contents = new vscode.MarkdownString().appendCodeblock(symbol.detail, 'mathprog');
+        if (symbol.comment) contents.appendMarkdown('\n\n---\n\n').appendText(symbol.comment);
+        return new vscode.Hover(contents, range);
+      }
       if (help[word]) return new vscode.Hover(help[word], range);
     }
   }));

@@ -37,14 +37,53 @@ const help = {
 };
 const keywords = [...new Set([...Object.keys(help), ...'for table if then else and or not div mod less union inter diff symdiff cross by dimen IN OUT'.split(' ')])];
 
+// Use one lexical pattern for masking and comment discovery, so markers inside strings are ignored.
+const nonCodePattern = /#[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)|"(?:""|[^"])*(?:"|$)|'(?:''|[^'])*(?:'|$)/g;
+
 // Mask comments and strings without changing offsets, including CRLF and multiline input.
 function mask(text) {
-  return text.replace(/#[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)|"(?:""|[^"])*(?:"|$)|'(?:''|[^'])*(?:'|$)/g,
+  return text.replace(nonCodePattern,
     value => value.replace(/[^\r\n]/g, ' '));
+}
+
+function commentTokens(text, clean) {
+  const result = [];
+  for (const match of text.matchAll(nonCodePattern)) {
+    const raw = match[0];
+    if (!raw.startsWith('#') && !raw.startsWith('/*')) continue;
+    const lineStart = text.lastIndexOf('\n', match.index - 1) + 1;
+    let content = raw.startsWith('#') ? raw.slice(1).replace(/^ ?/, '') : raw.slice(2, -2);
+    if (raw.startsWith('/*')) {
+      const lines = content.split(/\r?\n/).map(line => line.replace(/^[ \t]*\* ?/, ''));
+      while (lines.length && !lines[0].trim()) lines.shift();
+      while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+      const indent = Math.min(...lines.filter(line => line.trim()).map(line => line.match(/^[ \t]*/)[0].length));
+      content = lines.map(line => line.slice(Math.min(indent, line.match(/^[ \t]*/)[0].length))).join('\n');
+    }
+    result.push({ start: match.index, end: match.index + raw.length, content: content.trim(),
+      leading: !clean.slice(lineStart, match.index).trim() });
+  }
+  return result;
+}
+
+function precedingComment(text, start, comments) {
+  const parts = [];
+  let cursor = start;
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const comment = comments[i];
+    if (comment.end > cursor) continue;
+    const gap = text.slice(comment.end, cursor);
+    // A blank line, intervening statement, or another statement's trailing comment is a boundary.
+    if (!comment.leading || gap.trim() || (gap.match(/\n/g) || []).length > 1) break;
+    parts.unshift(comment.content);
+    cursor = comment.start;
+  }
+  return parts.join('\n').trim();
 }
 
 function declarations(text) {
   const clean = mask(text);
+  const comments = commentTokens(text, clean);
   const result = [];
   const pattern = /(?:^|;)\s*(set|param|var|minimize|maximize|subject\s+to|s\.t\.)\s+([A-Za-z_][A-Za-z0-9_]*)/g;
   for (const match of clean.matchAll(pattern)) {
@@ -54,6 +93,7 @@ function declarations(text) {
     const end = clean.indexOf(';', offset);
     result.push({ name, kind: match[1].replace(/\s+/g, ' '), offset, start,
       end: end < 0 ? text.length : end + 1,
+      comment: precedingComment(text, start, comments),
       detail: text.slice(start, end < 0 ? text.length : end + 1).replace(/\s+/g, ' ').slice(0, 300) });
     // Data section assignments must not shadow model declarations.
     if (/\bdata\s*;/.test(clean.slice(0, start))) break;

@@ -23,6 +23,33 @@ async function run() {
     assert.ok(hovers.length); report.push('Hover');
     const completion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', uri, use);
     assert.ok(completion.items.some(item => item.label === 'quantity')); report.push('Completion');
+    const commentUri = vscode.Uri.file(path.join(folder, 'hover-comments.mod'));
+    const commentText = '# 製品の集合\nset PRODUCTS;\n# 製品ごとの生産数量\n# 単位: 個\nvar quantity{PRODUCTS} >= 0;\n/**\n * 1個あたりの費用\n * [詳細](command:example)\n */\nparam cost{PRODUCTS} >= 0;\n# 古いコメント\n\nvar undocumented;\nminimize Total: sum {p in PRODUCTS} cost[p] * quantity[p];\n';
+    await vscode.workspace.fs.writeFile(commentUri, Buffer.from(commentText));
+    const commentDoc = await vscode.workspace.openTextDocument(commentUri);
+    const hoverAt = async offset => {
+      const result = await vscode.commands.executeCommand('vscode.executeHoverProvider', commentUri, commentDoc.positionAt(offset));
+      assert.ok(result.length);
+      return result.flatMap(hover => hover.contents);
+    };
+    const quantityHover = await hoverAt(commentText.lastIndexOf('quantity') + 2);
+    assert.ok(quantityHover.some(c => c.value.includes('var quantity{PRODUCTS} >= 0;') && c.value.includes('製品ごとの生産数量') && c.value.includes('単位')));
+    report.push('Variable hover includes definition and consecutive comments at reference');
+    const declaredHover = await hoverAt(commentText.indexOf('quantity') + 2);
+    assert.ok(declaredHover.some(c => c.value.includes('製品ごとの生産数量')));
+    const setHover = await hoverAt(commentText.indexOf('PRODUCTS') + 2);
+    assert.ok(setHover.some(c => c.value.includes('製品の集合')));
+    report.push('Comments shown at variable and set declarations');
+    const costHover = await hoverAt(commentText.lastIndexOf('cost') + 2);
+    assert.ok(costHover.some(c => c.value.includes('param cost') && c.value.includes('1個あたりの費用')));
+    report.push('Parameter hover includes multiline block comment');
+    assert.ok(costHover.every(c => c.isTrusted !== true));
+    assert.ok(costHover.some(c => c.value.includes('\\[詳細\\]')));
+    report.push('Comment Markdown shown as literal text');
+    const undocumented = await hoverAt(commentText.indexOf('undocumented') + 2);
+    assert.ok(undocumented.some(c => c.value.includes('var undocumented;')));
+    assert.ok(undocumented.every(c => !c.value.includes('古いコメント')));
+    report.push('Blank line separates unrelated comments from hover');
     if (vscode.workspace.isTrusted) {
       await vscode.commands.executeCommand('mathprog.check');
       assert.equal(vscode.languages.getDiagnostics(uri).length, 0); report.push('Model check command');

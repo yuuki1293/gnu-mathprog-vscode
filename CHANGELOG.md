@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Show comments directly preceding a declaration below its definition in symbol hovers.
+- Support consecutive `#` comments, multiline `/* ... */` comments, and mixed comment blocks; stop at blank lines or intervening code.
+
 ## 0.2.0
 
 - Associate `.dat` files with GNU MathProg for highlighting and editing support.
