@@ -77,8 +77,7 @@ function activate(context) {
     let candidates = name ? available.filter(entry => entry.config.name === name || configurationKey(entry) === name) : available;
     if (!candidates.length) {
       if (name) throw new Error(`実行構成が見つかりません: ${name}`);
-      const choice = await vscode.window.showInformationMessage('MathProg の実行構成を launch.json に作成してください。', '実行構成を作成');
-      if (choice) await createConfiguration();
+      await createConfiguration();
       return;
     }
     let selected;
@@ -98,7 +97,15 @@ function activate(context) {
   }
   async function configurationFolder() {
     const folders = (vscode.workspace.workspaceFolders || []).filter(folder => folder.uri.scheme === 'file');
-    if (!folders.length) throw new Error('実行構成を保存するフォルダーを VS Code で開いてください。');
+    if (!folders.length) {
+      const selected = await vscode.window.showOpenDialog({ canSelectMany: false, canSelectFiles: false,
+        canSelectFolders: true, title: '実行構成を保存するフォルダーを選択' });
+      if (!selected?.length) return;
+      await context.globalState.update('pendingCreateConfiguration', { folder: selected[0].toString(), requestedAt: Date.now() });
+      try { await vscode.commands.executeCommand('vscode.openFolder', selected[0], { forceNewWindow: false }); }
+      catch (error) { await context.globalState.update('pendingCreateConfiguration', undefined); throw error; }
+      return;
+    }
     const active = vscode.window.activeTextEditor?.document.uri;
     const folder = active && vscode.workspace.getWorkspaceFolder(active);
     if (folder?.uri.scheme === 'file') return folder;
@@ -255,11 +262,26 @@ function activate(context) {
     try { return await fn(...args); }
     catch (error) { vscode.window.showErrorMessage(`MathProg: ${error.message}`); return false; }
   }));
-  command('run', name => launch(false, name));
-  command('check', name => launch(true, name));
+  // Editor title buttons pass a resource URI; only strings explicitly select a configuration.
+  command('run', argument => launch(false, typeof argument === 'string' ? argument : undefined));
+  command('check', argument => launch(true, typeof argument === 'string' ? argument : undefined));
   command('showOutput', () => output.show());
   command('createConfiguration', draft => createConfiguration(draft));
-  command('selectConfiguration', name => chooseConfiguration(name, !name).then(entry => entry?.config.name));
+  command('selectConfiguration', argument => {
+    const name = typeof argument === 'string' ? argument : undefined;
+    return chooseConfiguration(name, !name).then(entry => entry?.config.name);
+  });
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => diagnostics.delete(event.document.uri)));
+  // Opening the first workspace restarts the extension host; continue the requested wizard there.
+  const pending = context.globalState.get('pendingCreateConfiguration');
+  if (pending) {
+    const expired = Date.now() - pending.requestedAt > 5 * 60 * 1000;
+    const matchingFolder = vscode.workspace.workspaceFolders?.some(folder => folder.uri.toString() === pending.folder);
+    if (expired || matchingFolder) {
+      void context.globalState.update('pendingCreateConfiguration', undefined)
+        .then(() => { if (!expired) return createConfiguration(); })
+        .catch(error => vscode.window.showErrorMessage(`MathProg: ${error.message}`));
+    }
+  }
 }
 module.exports = { activate };

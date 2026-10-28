@@ -70,6 +70,9 @@ async function run() {
       report.push('Check saved configuration through VS Code launch');
       assert.ok(await vscode.commands.executeCommand('mathprog.run', 'Inline production'));
       report.push('Run saved inline-data configuration');
+      assert.ok(await vscode.commands.executeCommand('mathprog.run', uri, { groupId: 1 }));
+      assert.ok(await vscode.commands.executeCommand('mathprog.check', uri, { groupId: 1 }));
+      report.push('Editor title URI arguments use saved configuration for Run and Check');
       const makeFile = async (relative, text) => {
         const file = vscode.Uri.joinPath(workspaceFolder.uri, relative);
         await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(file.fsPath)));

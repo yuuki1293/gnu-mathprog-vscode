@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- Handle resource URI arguments from editor title buttons correctly instead of treating them as configuration names.
+
+- Open the configuration creation wizard directly when Run or Check has no configuration.
+- When no workspace is open, select a folder and resume creation after opening it; cancel quietly without launching anything.
+
 ## 0.4.0
 
 - Replace filename-based model discovery and per-file model/data choices with explicit `.vscode/launch.json` configurations.

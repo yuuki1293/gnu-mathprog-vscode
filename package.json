@@ -2,7 +2,7 @@
   "name": "gnu-mathprog",
   "displayName": "GNU MathProg",
   "description": "GNU MathProg editing and GLPK execution support for VS Code.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "mathprog-local",
   "license": "MIT",
   "engines": {
@@ -22,7 +22,8 @@
   "main": "./src/extension.js",
   "activationEvents": [
     "onLanguage:mathprog",
-    "onDebug:mathprog"
+    "onDebug:mathprog",
+    "onStartupFinished"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -33,7 +34,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.4.0.vsix"
+    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.4.1.vsix"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.6.0",
