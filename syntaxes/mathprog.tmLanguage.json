@@ -1,0 +1,62 @@
+{
+  "name": "GNU MathProg",
+  "scopeName": "source.mathprog",
+  "patterns": [
+    {
+      "name": "comment.line.number-sign.mathprog",
+      "begin": "#",
+      "end": "$"
+    },
+    {
+      "name": "comment.block.mathprog",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
+      "name": "string.quoted.mathprog",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "match": "\"\"",
+          "name": "constant.character.escape.mathprog"
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.mathprog",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "match": "''",
+          "name": "constant.character.escape.mathprog"
+        }
+      ]
+    },
+    {
+      "name": "storage.type.mathprog",
+      "match": "\\b(set|param|var|minimize|maximize|subject\\s+to)\\b|\\bs\\.t\\."
+    },
+    {
+      "name": "keyword.control.mathprog",
+      "match": "\\b(set|param|var|minimize|maximize|solve|check|display|printf|for|table|data|end|in|within|by|cross|diff|symdiff|inter|union|less|div|mod|and|or|not|if|then|else|default|dimen|integer|binary|symbolic|IN|OUT)\\b"
+    },
+    {
+      "name": "support.function.mathprog",
+      "match": "\\b(abs|atan|card|ceil|cos|exp|floor|gmtime|length|log|log10|max|min|round|sin|sqrt|substr|sum|prod|forall|exists|setof|trunc|Uniform|Uniform01|Normal|Normal01|Irand224|str2time|time2str)\\b"
+    },
+    {
+      "name": "constant.numeric.mathprog",
+      "match": "(?<![\\w])(?:\\d+\\.(?!\\.)\\d*|\\.\\d+|\\d+)(?:[eEdD][+-]?\\d+)?(?!\\w)"
+    },
+    {
+      "name": "keyword.operator.mathprog",
+      "match": ":=|<=|>=|<>|!=|==|\\*\\*|\\.\\.|[+*/^<>=&|!~\\-]"
+    },
+    {
+      "name": "punctuation.mathprog",
+      "match": "[;:,{}\\[\\]()]"
+    }
+  ]
+}

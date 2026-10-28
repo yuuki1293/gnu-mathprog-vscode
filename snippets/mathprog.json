@@ -1,0 +1,89 @@
+{
+  "Set": {
+    "prefix": "set",
+    "body": [
+      "set ${1:I};"
+    ],
+    "description": "Set"
+  },
+  "Parameter": {
+    "prefix": "param",
+    "body": [
+      "param ${1:c}{${2:i in I}} >= 0;"
+    ],
+    "description": "Parameter"
+  },
+  "Variable": {
+    "prefix": "var",
+    "body": [
+      "var ${1:x}{${2:i in I}} >= 0;"
+    ],
+    "description": "Variable"
+  },
+  "Binary variable": {
+    "prefix": "binary",
+    "body": [
+      "var ${1:y}{${2:i in I}}, binary;"
+    ],
+    "description": "Binary variable"
+  },
+  "Minimize": {
+    "prefix": "minimize",
+    "body": [
+      "minimize ${1:Cost}: sum {${2:i in I}} ${3:c[i] * x[i]};"
+    ],
+    "description": "Minimize"
+  },
+  "Maximize": {
+    "prefix": "maximize",
+    "body": [
+      "maximize ${1:Profit}: sum {${2:i in I}} ${3:p[i] * x[i]};"
+    ],
+    "description": "Maximize"
+  },
+  "Constraint": {
+    "prefix": "subject",
+    "body": [
+      "subject to ${1:Capacity}{${2:i in I}}:",
+      "\t${3:x[i] <= capacity[i]};"
+    ],
+    "description": "Constraint"
+  },
+  "Sum": {
+    "prefix": "sum",
+    "body": [
+      "sum {${1:i in I}} ${2:x[i]}"
+    ],
+    "description": "Sum"
+  },
+  "Solve": {
+    "prefix": "solve",
+    "body": [
+      "solve;",
+      "display ${1:x};",
+      "end;"
+    ],
+    "description": "Solve"
+  },
+  "Model": {
+    "prefix": "model",
+    "body": [
+      "# ${1:Model}",
+      "set I;",
+      "param c{I};",
+      "var x{I} >= 0;",
+      "",
+      "minimize Cost: sum {i in I} c[i] * x[i];",
+      "subject to Demand: sum {i in I} x[i] >= 1;",
+      "",
+      "solve;",
+      "display x;",
+      "",
+      "data;",
+      "set I := A B;",
+      "param c := A 2 B 3;",
+      "end;"
+    ],
+    "description": "Model"
+  }
+}

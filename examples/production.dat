@@ -1,0 +1,9 @@
+# Use with production.mod via MathProg: Select Data File.
+# This replaces the model's inline data. Expected profit: 400.
+data;
+set PRODUCTS := chair table;
+param : profit hours :=
+  chair 20 2
+  table 35 4;
+param available := 40;
+end;

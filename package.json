@@ -1,0 +1,142 @@
+{
+  "name": "gnu-mathprog",
+  "displayName": "GNU MathProg",
+  "description": "GNU MathProg editing and GLPK execution support for VS Code.",
+  "version": "0.1.0",
+  "publisher": "mathprog-local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "glpk",
+    "mathprog",
+    "gmpl",
+    "optimization"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:mathprog"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Editing features work; executing GLPK requires a trusted workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.0",
+    "vscode-textmate": "^9.2.0",
+    "vscode-oniguruma": "^2.0.1"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "mathprog",
+        "aliases": [
+          "GNU MathProg",
+          "MathProg",
+          "GMPL"
+        ],
+        "extensions": [
+          ".mod",
+          ".mpl",
+          ".mathprog"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mathprog",
+        "scopeName": "source.mathprog",
+        "path": "./syntaxes/mathprog.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "mathprog",
+        "path": "./snippets/mathprog.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "mathprog.run",
+        "title": "Run Model",
+        "category": "MathProg",
+        "icon": "$(play)"
+      },
+      {
+        "command": "mathprog.check",
+        "title": "Check Model",
+        "category": "MathProg",
+        "icon": "$(check)"
+      },
+      {
+        "command": "mathprog.selectData",
+        "title": "Select Data File",
+        "category": "MathProg"
+      },
+      {
+        "command": "mathprog.clearData",
+        "title": "Clear Data File",
+        "category": "MathProg"
+      },
+      {
+        "command": "mathprog.showOutput",
+        "title": "Show Output",
+        "category": "MathProg"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mathprog.run",
+          "when": "resourceLangId == mathprog && isWorkspaceTrusted",
+          "group": "navigation"
+        },
+        {
+          "command": "mathprog.check",
+          "when": "resourceLangId == mathprog && isWorkspaceTrusted",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GNU MathProg",
+      "properties": {
+        "mathprog.glpsolPath": {
+          "type": "string",
+          "default": "glpsol",
+          "scope": "machine-overridable",
+          "description": "GLPK glpsol executable name or absolute path (without arguments)."
+        },
+        "mathprog.timeLimit": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "Solver time limit in seconds. A separate watchdog stops a process after this limit plus 5 seconds."
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yuuki1293/gnu-mathprog-vscode.git"
+  },
+  "homepage": "https://github.com/yuuki1293/gnu-mathprog-vscode#readme",
+  "bugs": {
+    "url": "https://github.com/yuuki1293/gnu-mathprog-vscode/issues"
+  }
+}
