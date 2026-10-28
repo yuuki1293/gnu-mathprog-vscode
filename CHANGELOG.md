@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Automatically check the selected launch configuration after saving model/data inputs, opening inputs, and changing configuration.
+- Add editor toolbar and status bar toggles; remember the enabled state per workspace.
+- Publish background diagnostics without opening output or notifications, and clear obsolete results when editing, switching configuration, or disabling analysis.
+- Serialize background work, pause it for manual launches, wait for unsaved edits, and respect workspace trust.
+- Resolve non-interactive launch variables and add a separate automatic-analysis time limit (10 seconds by default).
+
 ## 0.4.1
 
 - Handle resource URI arguments from editor title buttons correctly instead of treating them as configuration names.

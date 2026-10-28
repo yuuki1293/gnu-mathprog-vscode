@@ -5,12 +5,14 @@ const { help, keywords, mask, declarations, parseDiagnostics, solverArgs } = req
 const { runSolver } = require('./solver');
 const { initialConfiguration, resolveRunConfiguration, workspacePath } = require('./configuration');
 const { RunDebugAdapter } = require('./debugAdapter');
+const { registerAutomaticAnalysis } = require('./automaticAnalysis');
 
 function activate(context) {
   const selector = { language: 'mathprog' };
   const output = vscode.window.createOutputChannel('GNU MathProg');
   const diagnostics = vscode.languages.createDiagnosticCollection('mathprog');
   let busy = false;
+  let automatic;
   const activeCancellations = new Set();
   const symbolKind = kind => kind === 'set' ? vscode.SymbolKind.Array : kind === 'param' ? vscode.SymbolKind.Constant : kind === 'var' ? vscode.SymbolKind.Variable : vscode.SymbolKind.Function;
   const isCode = (doc, position) => {
@@ -67,10 +69,16 @@ function activate(context) {
 
   const configurationKey = entry => `${entry.folder.uri.toString()}#${entry.config.name}`;
   function entries() {
-    return (vscode.workspace.workspaceFolders || []).filter(folder => folder.uri.scheme === 'file').flatMap(folder =>
-      vscode.workspace.getConfiguration('launch', folder.uri).get('configurations', [])
-        .filter(config => config.type === 'mathprog' && config.request === 'launch')
-        .map(config => ({ folder, config })));
+    return (vscode.workspace.workspaceFolders || []).filter(folder => folder.uri.scheme === 'file').flatMap(folder => {
+      const configs = vscode.workspace.getConfiguration('launch', folder.uri).get('configurations', []);
+      return Array.isArray(configs) ? configs.filter(config => config?.type === 'mathprog' && config.request === 'launch')
+        .map(config => ({ folder, config })) : [];
+    });
+  }
+  function selectedEntry() {
+    const available = entries();
+    return available.find(entry => configurationKey(entry) === context.workspaceState.get('selectedConfiguration'))
+      || (available.length === 1 ? available[0] : undefined);
   }
   async function chooseConfiguration(name, forcePick = false) {
     const available = entries();
@@ -92,7 +100,10 @@ function activate(context) {
       })), { title: 'MathProg の実行構成', placeHolder: '実行するモデルとデータの組み合わせを選択' });
       selected = pick?.entry;
     }
-    if (selected) await context.workspaceState.update('selectedConfiguration', configurationKey(selected));
+    if (selected) {
+      await context.workspaceState.update('selectedConfiguration', configurationKey(selected));
+      automatic?.schedule();
+    }
     return selected;
   }
   async function configurationFolder() {
@@ -146,6 +157,7 @@ function activate(context) {
     if (!launch.get('version')) await launch.update('version', '0.2.0', vscode.ConfigurationTarget.WorkspaceFolder);
     await launch.update('configurations', [...existing, draft], vscode.ConfigurationTarget.WorkspaceFolder);
     await context.workspaceState.update('selectedConfiguration', configurationKey({ folder, config: draft }));
+    automatic?.schedule();
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(launchUri));
     return draft;
   }
@@ -166,6 +178,7 @@ function activate(context) {
     if (busy) throw new Error('MathProg は実行中です。停止してから別の構成を実行してください。');
     busy = true;
     try {
+      await automatic?.pause();
       const defaults = vscode.workspace.getConfiguration('mathprog', folder.uri);
       const config = resolveRunConfiguration(raw, folder.uri.fsPath, { glpsolPath: defaults.get('glpsolPath'), timeLimit: defaults.get('timeLimit') });
       await validateFiles(config);
@@ -206,7 +219,7 @@ function activate(context) {
       const message = error.code === 'ENOENT' ? 'glpsol が見つかりません。GLPK をインストールし、glpsolPath を設定してください。' : `MathProg: ${error.message}`;
       output.appendLine(message); output.show(true); vscode.window.showErrorMessage(message);
       throw new Error(message);
-    } finally { busy = false; }
+    } finally { busy = false; automatic?.resume(); }
   }
   const provider = {
     provideDebugConfigurations: () => [{ ...initialConfiguration, data: [] }],
@@ -238,26 +251,31 @@ function activate(context) {
   }));
   context.subscriptions.push(vscode.debug.onDidStartDebugSession(session => {
     if (session.type === 'mathprog' && session.workspaceFolder) {
-      void context.workspaceState.update('selectedConfiguration', configurationKey({ folder: session.workspaceFolder, config: session.configuration }));
+      void context.workspaceState.update('selectedConfiguration', configurationKey({ folder: session.workspaceFolder, config: session.configuration }))
+        .then(() => automatic?.schedule());
     }
   }));
   async function launch(check, name) {
     if (!vscode.workspace.isTrusted) { vscode.window.showWarningMessage('GLPK の実行には、ワークスペースを信頼する必要があります。'); return false; }
     if (busy) { vscode.window.showInformationMessage('MathProg は実行中です。停止してから実行してください。'); return false; }
-    const entry = await chooseConfiguration(name); if (!entry) return false;
-    const runId = `${Date.now()}-${Math.random()}`;
-    let done;
-    const completion = new Promise(resolve => { done = resolve; });
-    const sub = vscode.debug.onDidTerminateDebugSession(session => {
-      if (session.configuration.__mathprogRunId === runId) done(true);
-    });
+    await automatic?.pause();
     try {
-      const started = await vscode.debug.startDebugging(entry.folder, { ...entry.config,
-        action: check ? 'check' : entry.config.action || 'run', __mathprogRunId: runId }, { noDebug: true });
-      if (!started) return false;
-      return await completion;
-    } finally { sub.dispose(); }
+      const entry = await chooseConfiguration(name); if (!entry) return false;
+      const runId = `${Date.now()}-${Math.random()}`;
+      let done;
+      const completion = new Promise(resolve => { done = resolve; });
+      const sub = vscode.debug.onDidTerminateDebugSession(session => {
+        if (session.configuration.__mathprogRunId === runId) done(true);
+      });
+      try {
+        const started = await vscode.debug.startDebugging(entry.folder, { ...entry.config,
+          action: check ? 'check' : entry.config.action || 'run', __mathprogRunId: runId }, { noDebug: true });
+        if (!started) return false;
+        return await completion;
+      } finally { sub.dispose(); }
+    } finally { automatic?.resume(); }
   }
+
   const command = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(`mathprog.${id}`, async (...args) => {
     try { return await fn(...args); }
     catch (error) { vscode.window.showErrorMessage(`MathProg: ${error.message}`); return false; }
@@ -272,6 +290,8 @@ function activate(context) {
     return chooseConfiguration(name, !name).then(entry => entry?.config.name);
   });
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => diagnostics.delete(event.document.uri)));
+  automatic = registerAutomaticAnalysis(context, { getEntry: selectedEntry, entryCount: () => entries().length,
+    validateFiles, clearManualDiagnostics: () => diagnostics.clear() });
   // Opening the first workspace restarts the extension host; continue the requested wizard there.
   const pending = context.globalState.get('pendingCreateConfiguration');
   if (pending) {

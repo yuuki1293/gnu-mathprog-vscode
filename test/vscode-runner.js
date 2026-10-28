@@ -10,6 +10,8 @@ async function run() {
   try {
     const ext = vscode.extensions.getExtension('mathprog-local.gnu-mathprog');
     assert.ok(ext); await ext.activate(); report.push('Extension activation');
+    assert.equal(await vscode.commands.executeCommand('mathprog.toggleAnalysis'), false);
+    report.push('Automatic analysis starts enabled and can be disabled');
     const uri = vscode.Uri.file(path.join(folder, 'production.mod'));
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc);
@@ -161,6 +163,60 @@ async function run() {
       assert.equal(await vscode.commands.executeCommand('mathprog.createConfiguration', scenario), false);
       assert.equal(vscode.workspace.getConfiguration('launch', workspaceFolder.uri).get('configurations').filter(c => c.name === 'Scenario A').length, 1);
       report.push('Duplicate creation preserves existing configuration');
+      const waitFor = async (predicate, description) => {
+        const deadline = Date.now() + 10000;
+        while (Date.now() < deadline) {
+          if (predicate()) return;
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        throw new Error(`Automatic analysis: ${description}`);
+      };
+      const autoModel = await makeFile('models/automatic.mod', fs.readFileSync(model.fsPath, 'utf8')
+        .replace('solve;\n', 'printf "%g", sum {i in P} limit[i] > "analysis-result.txt";\nsolve;\n'));
+      const autoConfig = { ...scenario, name: 'Automatic', model: '${workspaceFolder}/models/automatic.mod' };
+      assert.ok(await vscode.commands.executeCommand('mathprog.createConfiguration', autoConfig));
+      const marker = path.join(folder, 'results with spaces/analysis-result.txt');
+      const markerValue = () => fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : undefined;
+      if (fs.existsSync(marker)) fs.unlinkSync(marker);
+      if (fs.existsSync(resultPath)) fs.unlinkSync(resultPath);
+      await vscode.window.showTextDocument(dataDoc);
+      assert.equal(await vscode.commands.executeCommand('mathprog.toggleAnalysis'), true);
+      await waitFor(() => markerValue() === '15', 'enabling did not check selected configuration');
+      assert.ok(!fs.existsSync(resultPath));
+      assert.equal(vscode.debug.activeDebugSession, undefined);
+      report.push('Enabling analysis checks saved configuration in background without solving or starting debug session');
+      await changeData('data;\nparam limit := a oops b 5;\nend;\n');
+      await dataDoc.save();
+      await waitFor(() => vscode.languages.getDiagnostics(values).some(d => d.source === 'MathProg (auto)' && d.range.start.line === 1), 'saved data error was not diagnosed');
+      report.push('Saving configured data automatically adds source errors to Problems');
+      assert.equal(await vscode.commands.executeCommand('mathprog.toggleAnalysis', values, { groupId: 1 }), false);
+      assert.ok(!vscode.languages.getDiagnostics(values).some(d => d.source === 'MathProg (auto)'));
+      await changeData('data;\nparam limit := a 11 b 5;\nend;\n');
+      await dataDoc.save(); await new Promise(resolve => setTimeout(resolve, 800));
+      assert.equal(markerValue(), '15');
+      report.push('Toolbar toggle disables analysis, clears its diagnostics, and prevents checking saves');
+      assert.equal(await vscode.commands.executeCommand('mathprog.toggleAnalysis'), true);
+      await waitFor(() => markerValue() === '16', 're-enabling did not check saved changes');
+      assert.equal(vscode.languages.getDiagnostics(values).length, 0);
+      report.push('Re-enabling immediately checks latest saved data and removes corrected errors');
+      await changeData('data;\nparam limit := a 12 b 5;\nend;\n');
+      await new Promise(resolve => setTimeout(resolve, 800));
+      assert.equal(markerValue(), '16'); assert.equal(dataDoc.isDirty, true);
+      await dataDoc.save(); await waitFor(() => markerValue() === '17', 'saving dirty input did not resume analysis');
+      report.push('Automatic analysis waits for saving edits and never saves input itself');
+      const autoInline = { ...autoConfig, name: 'Automatic inline', data: [] };
+      assert.ok(await vscode.commands.executeCommand('mathprog.createConfiguration', autoInline));
+      await waitFor(() => markerValue() === '3', 'configuration change did not switch analysis inputs');
+      report.push('Changing selected configuration rechecks the new model and data combination');
+      const launchSettings = vscode.workspace.getConfiguration('launch', workspaceFolder.uri);
+      await launchSettings.update('configurations', launchSettings.get('configurations').filter(c => c.type !== 'mathprog'), vscode.ConfigurationTarget.WorkspaceFolder);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      assert.equal(markerValue(), '3');
+      assert.equal(vscode.workspace.getConfiguration('launch', workspaceFolder.uri).get('configurations').filter(c => c.type === 'mathprog').length, 0);
+      assert.equal(vscode.debug.activeDebugSession, undefined);
+      report.push('No configuration means no background process or configuration creation prompt');
+      assert.equal(await vscode.commands.executeCommand('mathprog.toggleAnalysis'), false);
+
     } else report.push('Execution skipped: untrusted workspace');
     fs.writeFileSync(reportFile, JSON.stringify({ passed: true, checks: report }, null, 2));
   } catch (error) {

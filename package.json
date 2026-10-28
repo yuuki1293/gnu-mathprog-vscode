@@ -2,7 +2,7 @@
   "name": "gnu-mathprog",
   "displayName": "GNU MathProg",
   "description": "GNU MathProg editing and GLPK execution support for VS Code.",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "mathprog-local",
   "license": "MIT",
   "engines": {
@@ -34,7 +34,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.4.1.vsix"
+    "package": "vsce package --no-dependencies --allow-missing-repository --out ../gnu-mathprog-0.5.0.vsix"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.6.0",
@@ -99,6 +99,17 @@
         "command": "mathprog.showOutput",
         "title": "Show Output",
         "category": "MathProg"
+      },
+      {
+        "command": "mathprog.toggleAnalysis",
+        "title": "Toggle Automatic Analysis",
+        "category": "MathProg",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "mathprog.showAnalysisOutput",
+        "title": "Show Automatic Analysis Output",
+        "category": "MathProg"
       }
     ],
     "menus": {
@@ -112,6 +123,11 @@
           "command": "mathprog.check",
           "when": "resourceLangId == mathprog && isWorkspaceTrusted",
           "group": "navigation"
+        },
+        {
+          "command": "mathprog.toggleAnalysis",
+          "when": "resourceLangId == mathprog",
+          "group": "navigation@3"
         },
         {
           "command": "mathprog.selectConfiguration",
@@ -135,6 +151,13 @@
           "minimum": 1,
           "maximum": 86400,
           "description": "Solver time limit in seconds. A separate watchdog stops a process after this limit plus 5 seconds."
+        },
+        "mathprog.analysis.timeLimit": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 300,
+          "description": "自動解析のGLPK制限時間（秒）。実行構成のtimeLimitが短い場合はそちらを使用します。"
         }
       }
     },

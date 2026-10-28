@@ -36,3 +36,31 @@ function workspacePath(root, file) {
   return path.isAbsolute(relative) ? file : '${workspaceFolder}/' + relative.split(path.sep).join('/');
 }
 module.exports = { initialConfiguration, resolveRunConfiguration, workspacePath };
+
+// Background analysis must never prompt for input or execute command variables/pre-launch tasks.
+function resolveAnalysisConfiguration(raw, root, defaults = {}, variables = {}) {
+  const substitute = value => {
+    if (typeof value !== 'string') return value;
+    return value.replace(/\$\{([^}]+)\}/g, (_, key) => {
+      if (key === 'workspaceFolder') return root;
+      if (key.startsWith('workspaceFolder:') && variables.folders?.[key.slice(16)]) return variables.folders[key.slice(16)];
+      if (key.startsWith('env:') && variables.env?.[key.slice(4)] !== undefined) return variables.env[key.slice(4)];
+      if (key === 'workspaceFolderBasename') return path.basename(root);
+      if (key === 'pathSeparator' || key === '/') return path.sep;
+      const file = variables.file;
+      if (file) {
+        if (key === 'file') return file;
+        if (key === 'fileDirname') return path.dirname(file);
+        if (key === 'fileBasename') return path.basename(file);
+        if (key === 'fileBasenameNoExtension') return path.basename(file, path.extname(file));
+        if (key === 'fileExtname') return path.extname(file);
+      }
+      throw new Error(`自動解析では変数を解決できません: \${${key}}。固定パスを指定するか手動チェックを使用してください。`);
+    });
+  };
+  const config = { ...raw, action: 'check' };
+  for (const key of ['name', 'model', 'cwd', 'glpsolPath']) if (config[key] !== undefined) config[key] = substitute(config[key]);
+  if (Array.isArray(config.data)) config.data = config.data.map(substitute);
+  return resolveRunConfiguration(config, root, { ...defaults, glpsolPath: substitute(defaults.glpsolPath) });
+}
+module.exports.resolveAnalysisConfiguration = resolveAnalysisConfiguration;

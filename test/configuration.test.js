@@ -44,3 +44,16 @@ test('saved configurations keep explicit paths portable and literal filenames in
   assert.equal(resolveRunConfiguration({ ...base, model: filename }, root).model, filename);
   assert.match(workspacePath(root, path.resolve(root, '../outside.mod')), /workspaceFolder.*\.\./);
 });
+
+test('background checks resolve static variables without prompting or running command variables', () => {
+  const { resolveAnalysisConfiguration } = require('../src/configuration');
+  const config = resolveAnalysisConfiguration({ ...base, model: '${workspaceFolder}/model.mod',
+    data: ['${workspaceFolder:shared}/values.dat'], cwd: '${fileDirname}', glpsolPath: '${env:SOLVER}', action: 'run' }, root, {},
+    { folders: { shared: '/tmp/shared' }, env: { SOLVER: 'glpsol' }, file: '/tmp/project/active.mod' });
+  assert.equal(config.action, 'check'); assert.equal(config.model, path.join(root, 'model.mod'));
+  assert.equal(config.data[0], path.resolve('/tmp/shared/values.dat'));
+  assert.equal(config.cwd, path.resolve('/tmp/project')); assert.equal(config.glpsolPath, 'glpsol');
+  for (const model of ['${command:chooseModel}', '${input:model}', '${env:MISSING}', '${file}']) {
+    assert.throws(() => resolveAnalysisConfiguration({ ...base, model }, root));
+  }
+});

@@ -13,21 +13,24 @@ function fixture(options = {}) {
   const commands = new Map();
   const settings = { version: '0.2.0', configurations: [{ type: 'node', name: 'Existing', request: 'launch' }] };
   const global = options.global || new Map();
-  const state = new Map();
+  const state = new Map([['analysisEnabled', false]]);
   const memento = map => ({ get: key => map.get(key), update: async (key, value) => { if (value === undefined) map.delete(key); else map.set(key, value); } });
   const dialogs = options.dialogs ?? [[uri('/workspace/model.mod')]];
   const picks = options.picks ?? ['モデル内のデータを使う'];
   const vscode = {
     Uri: { file: uri, joinPath: (base, ...parts) => uri(path.join(base.fsPath, ...parts)) },
-    ConfigurationTarget: { WorkspaceFolder: 3 },
+    ConfigurationTarget: { WorkspaceFolder: 3 }, StatusBarAlignment: { Right: 2 },
     workspace: {
       isTrusted: true, workspaceFolders: options.noWorkspace ? undefined : [folder], textDocuments: [],
       getWorkspaceFolder: () => folder,
       getConfiguration: () => ({ get: (key, fallback) => settings[key] ?? fallback,
         update: async (key, value) => { settings[key] = value; calls.writes.push(key); } }),
-      openTextDocument: async target => ({ uri: target }), onDidChangeTextDocument: disposable
+      openTextDocument: async target => ({ uri: target }), onDidChangeTextDocument: disposable,
+      onDidSaveTextDocument: disposable, onDidOpenTextDocument: disposable, onDidChangeConfiguration: disposable,
+      onDidChangeWorkspaceFolders: disposable, onDidGrantWorkspaceTrust: disposable
     },
     window: {
+      onDidChangeActiveTextEditor: disposable, createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} }),
       createOutputChannel: () => ({ dispose() {}, append() {}, appendLine() {}, show() {}, clear() {} }),
       showOpenDialog: async opts => { calls.dialogs.push(opts); return dialogs.shift(); },
       showQuickPick: async items => typeof items[0] === 'object' ? items[0] : picks.shift(), showInputBox: async () => options.cancelName ? undefined : 'New run',
@@ -37,7 +40,7 @@ function fixture(options = {}) {
       showTextDocument: async doc => { calls.opened.push(doc.uri.fsPath); }
     },
     languages: {
-      createDiagnosticCollection: () => ({ dispose() {}, delete() {} }),
+      createDiagnosticCollection: () => ({ dispose() {}, delete() {}, clear() {} }),
       registerCompletionItemProvider: disposable, registerHoverProvider: disposable,
       registerDefinitionProvider: disposable, registerDocumentSymbolProvider: disposable
     },
@@ -50,7 +53,9 @@ function fixture(options = {}) {
   };
   const mod = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(src, 'extension.js'), 'utf8'), {
-    module: mod, require: id => id === 'vscode' ? vscode : require(id.startsWith('./') ? path.join(src, id) : id)
+    module: mod, require: id => id === 'vscode' ? vscode : id === './automaticAnalysis'
+      ? { registerAutomaticAnalysis: () => ({ schedule() {}, async pause() {}, resume() {} }) }
+      : require(id.startsWith('./') ? path.join(src, id) : id)
   }, { filename: 'extension.js' });
   mod.exports.activate({ subscriptions: [], workspaceState: memento(state), globalState: memento(global) });
   return { calls, commands, settings, global, state, folder };
